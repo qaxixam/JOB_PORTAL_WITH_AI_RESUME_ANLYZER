@@ -3,11 +3,17 @@ import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import getDataUri from "../utils/datauri.js";
 import cloudinary from "../utils/cloudinary.js";
+import crypto from 'node:crypto';
+import nodemailer from "nodemailer";
+import { createResetToken, verifyResetToken } from "../services/token.service.js";
+import { sendResetPasswordEmail } from "../services/email.service.js";
+
+
 
 export const register = async (req, res) => {
     try {
         const { fullname, email, phoneNumber, password, role } = req.body;
-         
+
         if (!fullname || !email || !phoneNumber || !password || !role) {
             return res.status(400).json({
                 message: "Something is missing",
@@ -33,8 +39,8 @@ export const register = async (req, res) => {
             phoneNumber,
             password: hashedPassword,
             role,
-            profile:{
-                profilePhoto:cloudResponse.secure_url,
+            profile: {
+                profilePhoto: cloudResponse.secure_url,
             }
         });
 
@@ -49,7 +55,7 @@ export const register = async (req, res) => {
 export const login = async (req, res) => {
     try {
         const { email, password, role } = req.body;
-        
+
         if (!email || !password || !role) {
             return res.status(400).json({
                 message: "Something is missing",
@@ -114,7 +120,7 @@ export const logout = async (req, res) => {
 export const updateProfile = async (req, res) => {
     try {
         const { fullname, email, phoneNumber, bio, skills } = req.body;
-        
+
         const file = req.file;
         // cloudinary ayega idhar
         const fileUri = getDataUri(file);
@@ -123,7 +129,7 @@ export const updateProfile = async (req, res) => {
 
 
         let skillsArray;
-        if(skills){
+        if (skills) {
             skillsArray = skills.split(",");
         }
         const userId = req.id; // middleware authentication
@@ -136,14 +142,14 @@ export const updateProfile = async (req, res) => {
             })
         }
         // updating data
-        if(fullname) user.fullname = fullname
-        if(email) user.email = email
-        if(phoneNumber)  user.phoneNumber = phoneNumber
-        if(bio) user.profile.bio = bio
-        if(skills) user.profile.skills = skillsArray
-      
+        if (fullname) user.fullname = fullname
+        if (email) user.email = email
+        if (phoneNumber) user.phoneNumber = phoneNumber
+        if (bio) user.profile.bio = bio
+        if (skills) user.profile.skills = skillsArray
+
         // resume comes later here...
-        if(cloudResponse){
+        if (cloudResponse) {
             user.profile.resume = cloudResponse.secure_url // save the cloudinary url
             user.profile.resumeOriginalName = file.originalname // Save the original file name
         }
@@ -161,11 +167,114 @@ export const updateProfile = async (req, res) => {
         }
 
         return res.status(200).json({
-            message:"Profile updated successfully.",
+            message: "Profile updated successfully.",
             user,
-            success:true
+            success: true
         })
     } catch (error) {
         console.log(error);
     }
 }
+export const forgotPassword = async (req, res) => {
+    try {
+        const { email } = req.body;
+
+        if (!email) {
+            return res.status(400).json({  // ✅ 400, not 404 (bad request, not found)
+                message: "Email is required",
+                success: false
+            });
+        }
+
+        const user = await User.findOne({ email });
+
+        if (!user) {
+
+            return res.status(200).json({
+                message: 'If an account exists, a reset link has been sent.',
+                success: true
+            });
+        }
+
+
+        const { resetToken, hashedToken, expiresAt } = createResetToken()
+
+
+
+
+
+
+
+
+        user.resetPasswordToken = hashedToken;
+        user.resetPasswordExpires = expiresAt;
+
+        await user.save();
+
+        const resetUrl = `${process.env.FRONTEND_URL}/reset-password/${resetToken}`;
+
+
+        await sendResetPasswordEmail(user.email, resetUrl)
+
+        res.status(200).json({
+            message: 'If an account exists, a reset link has been sent.',
+            success: true
+        });
+
+    } catch (error) {
+        console.error('Forgot password error:', error);
+        res.status(500).json({
+            message: 'Server error',
+            success: false
+        });
+    }
+};
+
+
+
+export const resetPassword = async (req, res) => {
+    try {
+        const { token } = req.params
+        const { password } = req.body;
+
+        if (!token || !password) {
+            return res.status(400).json({
+                message: 'Token and password are required',
+                success: false
+            });
+
+        }
+
+
+        const user = await User.findOne({
+            resetPasswordToken: { $exists: true },
+            resetPasswordExpires: { $gt: Date.now() }
+        })
+
+        if (!user || !verifyResetToken(token, user.resetPasswordToken)) {
+            return res.status(404).json({
+                message: "Invalid or expired token",
+                success: false
+            })
+        }
+        const hashPassword = await bcrypt.hash(password, 10)
+
+        user.password = hashPassword
+        user.resetPasswordToken = undefined
+        user.resetPasswordExpires = undefined;
+
+        await user.save();
+
+        res.status(200).json({
+            message: 'Password reset successful! You can now log in.',
+            success: true
+        });
+
+    } catch (error) {
+        console.error('Reset password error:', error);
+        res.status(500).json({
+            message: 'Server error',
+            success: false
+        });
+    }
+};
