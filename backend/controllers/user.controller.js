@@ -7,6 +7,8 @@ import crypto from 'node:crypto';
 import nodemailer from "nodemailer";
 import { createResetToken, verifyResetToken } from "../services/token.service.js";
 import { sendResetPasswordEmail } from "../services/email.service.js";
+import path from "path";
+import fs from "fs";
 
 
 
@@ -117,64 +119,117 @@ export const logout = async (req, res) => {
         console.log(error);
     }
 }
+
+
 export const updateProfile = async (req, res) => {
     try {
         const { fullname, email, phoneNumber, bio, skills } = req.body;
-
         const file = req.file;
-        // cloudinary ayega idhar
-        const fileUri = getDataUri(file);
-        const cloudResponse = await cloudinary.uploader.upload(fileUri.content);
 
+        let resumeUrl = null;
+        let resumeOriginalName = null;
 
+        if (file) {
+            try {
+                const userId = req.id;
 
-        let skillsArray;
-        if (skills) {
-            skillsArray = skills.split(",");
+                // Create uploads directory if it doesn't exist
+                const uploadsDir = path.join(process.cwd(), 'uploads', 'resumes');
+                if (!fs.existsSync(uploadsDir)) {
+                    fs.mkdirSync(uploadsDir, { recursive: true });
+                    console.log("Created uploads directory:", uploadsDir);
+                }
+
+                // Generate unique filename
+                const timestamp = Date.now();
+                const filename = `${userId}_${timestamp}_${file.originalname}`;
+                const filepath = path.join(uploadsDir, filename);
+
+                // Save file to disk
+                fs.writeFileSync(filepath, file.buffer);
+
+                // Store relative path for database
+                resumeUrl = `/uploads/resumes/${filename}`;
+                resumeOriginalName = file.originalname;
+
+                console.log("✅ Resume saved locally:", {
+                    filename: filename,
+                    path: resumeUrl,
+                    size: file.size,
+                    mimetype: file.mimetype
+                });
+
+            } catch (uploadError) {
+                console.error("❌ Resume upload failed:", uploadError.message);
+                return res.status(400).json({
+                    message: "Failed to upload resume. Please try again.",
+                    error: uploadError.message,
+                    success: false
+                });
+            }
         }
-        const userId = req.id; // middleware authentication
-        let user = await User.findById(userId);
 
+        let skillsArray = [];
+        if (skills) {
+            skillsArray = skills
+                .split(",")
+                .map(skill => skill.trim())
+                .filter(skill => skill.length > 0);
+        }
+
+        const userId = req.id;
+
+        let user = await User.findById(userId);
         if (!user) {
-            return res.status(400).json({
+            return res.status(404).json({
                 message: "User not found.",
                 success: false
-            })
-        }
-        // updating data
-        if (fullname) user.fullname = fullname
-        if (email) user.email = email
-        if (phoneNumber) user.phoneNumber = phoneNumber
-        if (bio) user.profile.bio = bio
-        if (skills) user.profile.skills = skillsArray
-
-        // resume comes later here...
-        if (cloudResponse) {
-            user.profile.resume = cloudResponse.secure_url // save the cloudinary url
-            user.profile.resumeOriginalName = file.originalname // Save the original file name
+            });
         }
 
+        if (fullname) user.fullname = fullname;
+        if (email) user.email = email;
+        if (phoneNumber) user.phoneNumber = phoneNumber;
+        if (bio) user.profile.bio = bio;
+        if (skillsArray.length > 0) user.profile.skills = skillsArray;
+
+        if (resumeUrl) {
+            user.profile.resume = resumeUrl; // Relative path
+            user.profile.resumeOriginalName = resumeOriginalName;
+        }
 
         await user.save();
 
-        user = {
+        const userResponse = {
             _id: user._id,
             fullname: user.fullname,
             email: user.email,
             phoneNumber: user.phoneNumber,
             role: user.role,
-            profile: user.profile
-        }
+            profile: {
+                bio: user.profile.bio,
+                skills: user.profile.skills,
+                resume: user.profile.resume,
+                resumeOriginalName: user.profile.resumeOriginalName,
+                profilePhoto: user.profile.profilePhoto
+            }
+        };
 
         return res.status(200).json({
             message: "Profile updated successfully.",
-            user,
+            user: userResponse,
             success: true
-        })
+        });
+
     } catch (error) {
-        console.log(error);
+        console.error("Update profile error:", error);
+        return res.status(500).json({
+            message: "An error occurred while updating profile.",
+            error: error.message,
+            success: false
+        });
     }
-}
+};
 export const forgotPassword = async (req, res) => {
     try {
         const { email } = req.body;

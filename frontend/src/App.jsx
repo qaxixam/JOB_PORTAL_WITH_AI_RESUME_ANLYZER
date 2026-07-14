@@ -16,6 +16,7 @@ import Applicants from "./components/admin/Applicants";
 import ProtectedRoute from "./components/admin/ProtectedRoute";
 import ForgotPassword from "./components/auth/ForgotPassword";
 import ResetPassword from "./components/auth/ResetPassword";
+import AIAnalysis from "./components/admin/AIAnalysis";
 
 const appRouter = createBrowserRouter([
   {
@@ -101,6 +102,14 @@ const appRouter = createBrowserRouter([
     element: (
       <ProtectedRoute>
         <Applicants />
+      </ProtectedRoute>
+    ),
+  },
+  {
+    path: "/admin/analysis/:applicationId",
+    element: (
+      <ProtectedRoute>
+        <AIAnalysis />
       </ProtectedRoute>
     ),
   },
