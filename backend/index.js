@@ -19,7 +19,7 @@ app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 app.use(cookieParser());
 const corsOptions = {
-    origin: 'https://job-portal-with-ai-resume-anlyzer-1.onrender.com/',
+    origin: 'https://job-portal-with-ai-resume-anlyzer-1.onrender.com',
     credentials: true
 }
 
